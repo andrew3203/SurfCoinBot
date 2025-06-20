@@ -33,7 +33,7 @@ func (h *TelegramHandler) HandleUpdate(update tgbotapi.Update) {
 	case isCommand(text, "/athlete"):
 		h.handleAthlete(chatID, update)
 
-	case strings.HasPrefix(text, "/coach "):
+	case strings.HasPrefix(text, "/coach"):
 		h.handleCoach(chatID, update)
 
 	case isCommand(text, "/ranking"):
@@ -45,16 +45,16 @@ func (h *TelegramHandler) HandleUpdate(update tgbotapi.Update) {
 	case isCommand(text, "/pending"):
 		h.handlePending(chatID, user)
 
-	case strings.HasPrefix(text, "/approve "):
+	case strings.HasPrefix(text, "/approve"):
 		h.handleApprove(chatID, text, user)
 
-	case strings.HasPrefix(text, "/give "):
+	case strings.HasPrefix(text, "/give"):
 		h.handleGive(chatID, text, user)
 
 	case isCommand(text, "/athletes"):
 		h.handleAthletes(chatID, user)
 
-	case strings.HasPrefix(text, "/reject "):
+	case strings.HasPrefix(text, "/reject"):
 		h.handleReject(chatID, text, user)
 
 	case strings.HasPrefix(text, "/history"):
@@ -91,16 +91,39 @@ func (h *TelegramHandler) SetBotCommands() error {
 
 func (h *TelegramHandler) handleStart(chatID int64, user *domain.User) {
 	if user == nil {
-		util.SafeSend(h.Bot, tgbotapi.NewMessage(chatID,
-			"👋 Привет! Напиши /athlete если ты спортсмен, или /coach <секретный_ключ> если ты тренер."))
-	} else if user.Role == domain.RoleCoach {
-		util.SafeSend(h.Bot, tgbotapi.NewMessage(chatID,
-			fmt.Sprintf("👋 Добро пожаловать, тренер %s!", user.Name)))
-	} else {
-		util.SafeSend(h.Bot, tgbotapi.NewMessage(chatID,
-			fmt.Sprintf("👋 Привет, %s! Ты зарегистрирован как спортсмен.", user.Name)))
+		msg := "👋 Привет! Добро пожаловать в SurfCoinBot.\n\n" +
+			"Для начала укажи свою роль:\n" +
+			"• /athlete — если ты спортсмен\n" +
+			"• /coach <секретный_ключ> — если ты тренер\n\n" +
+			"После этого ты сможешь использовать соответствующие команды."
+		util.SafeSend(h.Bot, tgbotapi.NewMessage(chatID, msg))
+		return
+	}
+
+	switch user.Role {
+	case domain.RoleAthlete:
+		msg := "👋 Привет, " + user.Name + "! Ты зарегистрирован как спортсмен.\n\n" +
+			"📋 Доступные команды:\n" +
+			"• /request <баллы> <причина> — отправить запрос на баллы\n" +
+			"• /my_score — посмотреть свой счёт\n" +
+			"• /ranking — общий рейтинг\n" +
+			"• /history — история начислений\n"
+		util.SafeSend(h.Bot, tgbotapi.NewMessage(chatID, msg))
+
+	case domain.RoleCoach:
+		msg := "👋 Добро пожаловать, тренер " + user.Name + "!\n\n" +
+			"📋 Доступные команды:\n" +
+			"• /pending — список запросов на подтверждение\n" +
+			"• /approve <id> — подтвердить запрос\n" +
+			"• /reject <id> — отклонить запрос\n" +
+			"• /give <баллы> @username <причина> — начислить баллы вручную\n" +
+			"• /athletes — список спортсменов\n" +
+			"• /ranking — общий рейтинг\n" +
+			"• /history @username — история спортсмена\n"
+		util.SafeSend(h.Bot, tgbotapi.NewMessage(chatID, msg))
 	}
 }
+
 
 func (h *TelegramHandler) handleAthlete(chatID int64, update tgbotapi.Update) {
 	user, _ := h.Repo.GetUserByID(chatID)
