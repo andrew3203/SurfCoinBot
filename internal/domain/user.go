@@ -13,3 +13,9 @@ type User struct {
 	Username string
 	Role     Role
 }
+
+type AthleteShort struct {
+	ID       int64  `db:"id"`
+	Name     string `db:"name"`
+	Username string `db:"username"`
+}

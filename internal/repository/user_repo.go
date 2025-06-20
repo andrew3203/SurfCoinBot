@@ -60,15 +60,8 @@ func (r *UserRepository) RegisterUser(user *domain.User) error {
 	return tx.Commit()
 }
 
-type ScoreEntry struct {
-	UserID   int64  `db:"user_id"`
-	Name     string `db:"name"`
-	Username string `db:"username"`
-	Score    int    `db:"score"`
-}
-
 // GetRanking returns athletes ordered by score DESC
-func (r *UserRepository) GetRanking() ([]ScoreEntry, error) {
+func (r *UserRepository) GetRanking() ([]domain.ScoreEntry, error) {
 	query := `
 		SELECT u.id as user_id, u.name, s.score
 		FROM users u
@@ -77,7 +70,7 @@ func (r *UserRepository) GetRanking() ([]ScoreEntry, error) {
 		ORDER BY s.score DESC, u.name ASC
 	`
 
-	var ranking []ScoreEntry
+	var ranking []domain.ScoreEntry
 	err := r.DB.Select(&ranking, query)
 	if err != nil {
 		return nil, err
@@ -274,4 +267,118 @@ func (r *UserRepository) GetUserHistory(userID int64) ([]domain.PointRecord, err
 	}
 
 	return history, nil
+}
+
+func (r *UserRepository) GetTeamByName(name string) (*domain.Team, error) {
+	var team domain.Team
+	err := r.DB.Get(&team, `SELECT id, name FROM team WHERE name = $1`, name)
+	if err != nil {
+		return nil, err
+	}
+	return &team, nil
+}
+
+func (r *UserRepository) GetTeamByID(id int) (*domain.Team, error) {
+	var team domain.Team
+	err := r.DB.Get(&team, "SELECT id, name FROM team WHERE id = $1", id)
+	if err != nil {
+		return nil, fmt.Errorf("команда с ID %d не найдена: %w", id, err)
+	}
+	return &team, nil
+}
+
+func (r *UserRepository) AssignUserToTeam(userID int64, teamID int) error {
+	_, err := r.DB.Exec("UPDATE users SET team_id = $1 WHERE id = $2", teamID, userID)
+	if err != nil {
+		return fmt.Errorf("не удалось назначить команду пользователю: %w", err)
+	}
+	return nil
+}
+
+func (r *UserRepository) CreateTeam(name string) error {
+	_, err := r.DB.Exec(`INSERT INTO team (name) VALUES ($1)`, name)
+	return err
+}
+
+func (r *UserRepository) DeleteTeam(teamID int) error {
+	_, err := r.DB.Exec(`DELETE FROM team WHERE id = $1`, teamID)
+	return err
+}
+
+func (r *UserRepository) ListTeams() ([]domain.Team, error) {
+	var teams []domain.Team
+	err := r.DB.Select(&teams, `
+		SELECT id, name FROM team ORDER BY name ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка при получении команд: %w", err)
+	}
+	return teams, nil
+}
+
+func (r *UserRepository) ListAthletesByTeam(teamID *int) ([]domain.AthleteShort, error) {
+	query := "SELECT id, name, username FROM users WHERE role = 'athlete'"
+	var args []interface{}
+	if teamID != nil {
+		query += " AND team_id = $1"
+		args = append(args, *teamID)
+	}
+	query += " ORDER BY name ASC"
+
+	var athletes []domain.AthleteShort
+	err := r.DB.Select(&athletes, query, args...)
+	return athletes, err
+}
+
+func (r *UserRepository) GetPendingRequestsByTeam(teamID *int) ([]PendingRequest, error) {
+	query := `
+		SELECT p.id, p.from_id, u.name, u.username, p.amount, p.reason
+		FROM point p
+		JOIN users u ON p.from_id = u.id
+		WHERE p.pending = true`
+	var args []interface{}
+	if teamID != nil {
+		query += " AND u.team_id = $1"
+		args = append(args, *teamID)
+	}
+	query += " ORDER BY p.id ASC"
+
+	var requests []PendingRequest
+	err := r.DB.Select(&requests, query, args...)
+	return requests, err
+}
+
+func (r *UserRepository) GetRankingByTeam(teamID int) ([]domain.ScoreEntry, error) {
+	query := `
+		SELECT u.id as user_id, u.name, u.username, s.score
+		FROM users u
+		JOIN user_score s ON u.id = s.user_id
+		WHERE u.role = 'athlete' AND u.team_id = $1
+		ORDER BY s.score DESC, u.name ASC
+	`
+	var ranking []domain.ScoreEntry
+	err := r.DB.Select(&ranking, query, teamID)
+	if err != nil {
+		return nil, err
+	}
+	return ranking, nil
+}
+
+func (r *UserRepository) GetUserTeamID(userID int64) (int, error) {
+	var teamID int
+	err := r.DB.Get(&teamID, `SELECT team_id FROM users WHERE id = $1`, userID)
+	if err != nil {
+		return 0, fmt.Errorf("не удалось получить team_id пользователя: %w", err)
+	}
+	return teamID, nil
+}
+
+
+func (r *UserRepository) GetUserTeamName(userID int64) (string, error) {
+	var name string
+	err := r.DB.Get(&name, `SELECT name FROM users WHERE id = $1`, userID)
+	if err != nil {
+		return "", fmt.Errorf("не удалось получить команду пользователя: %w", err)
+	}
+	return name, nil
 }
