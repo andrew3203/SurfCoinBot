@@ -1,0 +1,23 @@
+services:
+  surf_bot:
+    build:
+      context: .
+      dockerfile: ./compose/Dockerfile
+    container_name: surf_bot
+    image: surf_bot
+    env_file:
+      - .env
+    depends_on:
+      - surf_db
+    command: ["start"]
+
+  surf_db:
+    image: postgres:17
+    container_name: surf_db
+    env_file:
+      - .env
+    volumes:
+      - surf_db:/var/lib/postgresql/data
+
+volumes:
+  surf_db:
