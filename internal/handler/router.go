@@ -715,7 +715,7 @@ func (h *TelegramHandler) handleCreateTeam(chatID int64, text string, user *doma
 	}
 
 	args := strings.Fields(text)
-	if len(args) <= 2 {
+	if len(args) < 2 {
 		util.SafeSend(h.Bot, tgbotapi.NewMessage(chatID, "❗ Формат: /create_team <название>"))
 		return
 	}
