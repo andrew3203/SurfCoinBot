@@ -29,6 +29,10 @@ func main() {
 	u.Timeout = 60
 	updates := bot.GetUpdatesChan(u)
 
+	// if err := handler.SetBotCommands(); err != nil {
+	// 	log.Fatalf("не удалось установить команды бота: %v", err)
+	// }
+
 	// Main loop
 	for update := range updates {
 		handler.HandleUpdate(update)

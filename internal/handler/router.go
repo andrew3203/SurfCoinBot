@@ -68,6 +68,27 @@ func (h *TelegramHandler) HandleUpdate(update tgbotapi.Update) {
 	}
 }
 
+func (h *TelegramHandler) SetBotCommands() error {
+	commands := []tgbotapi.BotCommand{
+		{Command: "start", Description: "Начать работу с ботом"},
+		{Command: "athlete", Description: "Зарегистрироваться как спортсмен"},
+		{Command: "coach", Description: "Зарегистрироваться как тренер"},
+		{Command: "ranking", Description: "Посмотреть рейтинг спортсменов"},
+		{Command: "request", Description: "Запросить баллы: /request <баллы> <причина>"},
+		{Command: "pending", Description: "Запросы на подтверждение (только для тренера)"},
+		{Command: "approve", Description: "Подтвердить запрос: /approve <id>"},
+		{Command: "reject", Description: "Отклонить запрос: /reject <id>"},
+		{Command: "give", Description: "Начислить баллы: /give @username <баллы> <причина>"},
+		{Command: "athletes", Description: "Список спортсменов"},
+		{Command: "history", Description: "История начислений (или /history @username для тренера)"},
+		{Command: "my_score", Description: "Текущий счёт спортсмена"},
+	}
+
+	cfg := tgbotapi.NewSetMyCommands(commands...)
+	_, err := h.Bot.Request(cfg)
+	return err
+}
+
 func (h *TelegramHandler) handleStart(chatID int64, user *domain.User) {
 	if user == nil {
 		util.SafeSend(h.Bot, tgbotapi.NewMessage(chatID,
@@ -82,6 +103,12 @@ func (h *TelegramHandler) handleStart(chatID int64, user *domain.User) {
 }
 
 func (h *TelegramHandler) handleAthlete(chatID int64, update tgbotapi.Update) {
+	user, _ := h.Repo.GetUserByID(chatID)
+	if user != nil {
+		util.SafeSend(h.Bot, tgbotapi.NewMessage(chatID, "ℹ️ Ты уже зарегистрирован как "+string(user.Role)+"."))
+		return
+	}
+
 	name := update.Message.From.FirstName
 	username := update.Message.From.UserName
 	err := h.Repo.RegisterUser(&domain.User{
@@ -103,6 +130,13 @@ func (h *TelegramHandler) handleCoach(chatID int64, update tgbotapi.Update) {
 		util.SafeSend(h.Bot, tgbotapi.NewMessage(chatID, "🚫 Неверный секретный ключ."))
 		return
 	}
+
+	user, _ := h.Repo.GetUserByID(chatID)
+	if user != nil {
+		util.SafeSend(h.Bot, tgbotapi.NewMessage(chatID, "ℹ️ Ты уже зарегистрирован как "+string(user.Role)+"."))
+		return
+	}
+
 	name := update.Message.From.FirstName
 	username := update.Message.From.UserName
 	err := h.Repo.RegisterUser(&domain.User{
@@ -159,8 +193,12 @@ func (h *TelegramHandler) handleRequest(chatID int64, text string, user *domain.
 
 	// Parse command: /request <amount> <reason>
 	parts := strings.SplitN(text, " ", 3)
+	if len(parts) < 2 {
+		util.SafeSend(h.Bot, tgbotapi.NewMessage(chatID, "❗ Укажи количество баллов после команды /request."))
+		return
+	}
 	if len(parts) < 3 {
-		util.SafeSend(h.Bot, tgbotapi.NewMessage(chatID, "❗ Формат: /request <баллы> <причина>"))
+		util.SafeSend(h.Bot, tgbotapi.NewMessage(chatID, "❗ Укажи причину запроса после количества баллов."))
 		return
 	}
 
