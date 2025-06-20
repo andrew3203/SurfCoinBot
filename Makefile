@@ -30,6 +30,15 @@ reset:
 migrate:
 	docker-compose run --rm surf_bot migrate
 
+format:
+	goimports -w .
+	gofmt -w .
+
+lint:
+	golangci-lint run
+
+check: format lint
+
 mm:
 ifndef name
 	$(error ❌ No name provided, run for example: make mm create_users)

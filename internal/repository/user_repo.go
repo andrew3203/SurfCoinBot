@@ -4,8 +4,10 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/jmoiron/sqlx"
 	"surf_bot/internal/domain"
+	"surf_bot/internal/util"
+
+	"github.com/jmoiron/sqlx"
 )
 
 type UserRepository struct {
@@ -41,27 +43,28 @@ func (r *UserRepository) RegisterUser(user *domain.User) error {
 
 	tx := r.DB.MustBegin()
 
-	_, err = tx.Exec("INSERT INTO users (id, name, role) VALUES ($1, $2, $3)", user.ID, user.Name, user.Role)
+	_, err = tx.Exec("INSERT INTO users (id, name, username, role) VALUES ($1, $2, $3, $4)", user.ID, user.Name, user.Username, user.Role)
 	if err != nil {
-		tx.Rollback()
+		util.SafeRollback(tx)
 		return fmt.Errorf("failed to insert into users: %w", err)
 	}
 
-	if user.role != domain.RoleCoach {
+	if user.Role != domain.RoleCoach {
 		_, err = tx.Exec("INSERT INTO user_score (user_id, score) VALUES ($1, 0)", user.ID)
 		if err != nil {
-			tx.Rollback()
+			util.SafeRollback(tx)
 			return fmt.Errorf("failed to insert into user_score: %w", err)
-	}
+		}
 	}
 
 	return tx.Commit()
 }
 
 type ScoreEntry struct {
-	UserID int64  `db:"user_id"`
-	Name   string `db:"name"`
-	Score  int    `db:"score"`
+	UserID   int64  `db:"user_id"`
+	Name     string `db:"name"`
+	Username string `db:"username"`
+	Score    int    `db:"score"`
 }
 
 // GetRanking returns athletes ordered by score DESC
@@ -97,17 +100,18 @@ func (r *UserRepository) CreatePendingRequest(fromID int64, amount int, reason s
 }
 
 type PendingRequest struct {
-	ID     int    `db:"id"`
-	UserID int64  `db:"from_id"`
-	Name   string `db:"name"`
-	Amount int    `db:"amount"`
-	Reason string `db:"reason"`
+	ID       int    `db:"id"`
+	UserID   int64  `db:"from_id"`
+	Name     string `db:"name"`
+	Username string `db:"username"`
+	Amount   int    `db:"amount"`
+	Reason   string `db:"reason"`
 }
 
 // GetPendingRequests returns all pending point requests
 func (r *UserRepository) GetPendingRequests() ([]PendingRequest, error) {
 	query := `
-		SELECT p.id, p.from_id, u.name, p.amount, p.reason
+		SELECT p.id, p.from_id, u.name, u.username, p.amount, p.reason
 		FROM point p
 		JOIN users u ON p.from_id = u.id
 		WHERE p.pending = true
@@ -134,21 +138,21 @@ func (r *UserRepository) ApproveRequest(id int) error {
 	// Найти запрос
 	err := tx.Get(&req, "SELECT from_id, amount FROM point WHERE id = $1 AND pending = true", id)
 	if err != nil {
-		tx.Rollback()
+		util.SafeRollback(tx)
 		return fmt.Errorf("запрос не найден или уже обработан: %w", err)
 	}
 
 	// Начислить баллы
 	_, err = tx.Exec("UPDATE user_score SET score = score + $1 WHERE user_id = $2", req.Amount, req.FromID)
 	if err != nil {
-		tx.Rollback()
+		util.SafeRollback(tx)
 		return fmt.Errorf("не удалось начислить баллы: %w", err)
 	}
 
 	// Пометить как подтвержденный
 	_, err = tx.Exec("UPDATE point SET pending = false WHERE id = $1", id)
 	if err != nil {
-		tx.Rollback()
+		util.SafeRollback(tx)
 		return fmt.Errorf("не удалось обновить статус запроса: %w", err)
 	}
 
@@ -167,7 +171,7 @@ func (r *UserRepository) GivePoints(toUsername string, amount int, reason string
 		WHERE LOWER(username) = LOWER($1) AND role = 'athlete'
 	`, toUsername)
 	if err != nil {
-		tx.Rollback()
+		util.SafeRollback(tx)
 		return fmt.Errorf("спортсмен с именем %s не найден: %w", toUsername, err)
 	}
 
@@ -176,7 +180,7 @@ func (r *UserRepository) GivePoints(toUsername string, amount int, reason string
 		UPDATE user_score SET score = score + $1 WHERE user_id = $2
 	`, amount, user.ID)
 	if err != nil {
-		tx.Rollback()
+		util.SafeRollback(tx)
 		return fmt.Errorf("не удалось начислить баллы: %w", err)
 	}
 
@@ -186,7 +190,7 @@ func (r *UserRepository) GivePoints(toUsername string, amount int, reason string
 		VALUES ($1, $2, $3, false)
 	`, user.ID, amount, reason)
 	if err != nil {
-		tx.Rollback()
+		util.SafeRollback(tx)
 		return fmt.Errorf("не удалось сохранить в историю: %w", err)
 	}
 
@@ -194,8 +198,8 @@ func (r *UserRepository) GivePoints(toUsername string, amount int, reason string
 }
 
 type AthleteShort struct {
-	ID   int64  `db:"id"`
-	Name string `db:"name"`
+	ID       int64  `db:"id"`
+	Name     string `db:"name"`
 	Username string `db:"username"`
 }
 
@@ -229,11 +233,6 @@ func (r *UserRepository) RejectRequest(id int) (int64, error) {
 	return fromID, nil
 }
 
-type ScoreEntry struct {
-	Amount int    `db:"amount"`
-	Reason string `db:"reason"`
-}
-
 func (r *UserRepository) GetUserByUsername(username string) (*domain.User, error) {
 	var u domain.User
 	err := r.DB.Get(&u, `
@@ -256,4 +255,23 @@ func (r *UserRepository) GetUserScore(userID int64) (int, error) {
 		return 0, fmt.Errorf("не удалось получить счёт: %w", err)
 	}
 	return score, nil
+}
+
+// GetUserHistory returns the list of confirmed point records for a given user.
+func (r *UserRepository) GetUserHistory(userID int64) ([]domain.PointRecord, error) {
+	var history []domain.PointRecord
+
+	query := `
+		SELECT amount, reason
+		FROM point
+		WHERE from_id = $1 AND pending = false
+		ORDER BY id DESC
+	`
+
+	err := r.DB.Select(&history, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("не удалось получить историю начислений: %w", err)
+	}
+
+	return history, nil
 }
